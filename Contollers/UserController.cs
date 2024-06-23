@@ -62,6 +62,34 @@ public class UserController : ControllerBase
         return singleUser;
     }
 
+    // explicit parameters above in curly braces
+    [HttpGet("GetUserSalary/{userId}")]
+    public UserSalary GetUserSalary(int userId)
+    {
+        string sql = @"
+               SELECT [UserId],
+                [Salary]
+            FROM TutorialAppSchema.UserSalary
+                WHERE UserId = " + userId.ToString();
+        UserSalary userSalary = _dapper.LoadDataSingle<UserSalary>(sql);
+        return userSalary;
+    }
+
+
+    [HttpGet("GetSingleUserJobInfo/{userId}")]
+    public UserJobInfo GetSingleUserJobInfo(int userId)
+    {
+        string sql = @"
+               SELECT [UserId],
+                [JobTitle],
+                [Department]
+            FROM TutorialAppSchema.UserJobInfo
+                WHERE UserId = " + userId.ToString();
+        UserJobInfo singleUserJobInfo = _dapper.LoadDataSingle<UserJobInfo>(sql);
+        return singleUserJobInfo;
+    }
+
+
     [HttpPut("EditUser")]
     public IActionResult EditUser(User user)
     // end point is looking for a model to be passed in with the payload
@@ -83,6 +111,42 @@ public class UserController : ControllerBase
         }
         throw new Exception("Failed to Update User");
     }
+
+    [HttpPut("EditUserSalary")]
+    public IActionResult EditUserSalary(UserSalary userSalaryForUpdate)
+    // end point is looking for a model to be passed in with the payload
+    {
+        string sql = @"
+            UPDATE TutorialAppSchema.UserSalary
+                SET [Salary] = " + userSalaryForUpdate.Salary +
+                " WHERE UserId = " + userSalaryForUpdate.UserId;
+
+        if (_dapper.ExecuteSql(sql))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to Update User Salary");
+    }
+
+
+    [HttpPut("EditUserJobInfo")]
+    public IActionResult EditUserJobInfo(UserJobInfo user)
+    // end point is looking for a model to be passed in with the payload
+    {
+        string sql = @"
+            UPDATE TutorialAppSchema.UserJobInfo
+                SET [JobTitle] = '" + user.JobTitle +
+                "', [Department] = '" + user.Department +
+                "' WHERE UserId = " + user.UserId;
+
+        if (_dapper.ExecuteSql(sql))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to Update User Job Info");
+    }
+
+
     [HttpPost("AddUser")]
     public IActionResult AddUser(UserToAddDto user)
     {
@@ -99,13 +163,51 @@ public class UserController : ControllerBase
             "', '" + user.Active +
         "')";
 
-        Console.WriteLine(sql);
-
         if (_dapper.ExecuteSql(sql))
         {
             return Ok();
         }
         throw new Exception("Failed to Add User");
+    }
+
+    [HttpPost("AddUserSalary")]
+    public IActionResult AddUserSalary(UserSalary user)
+    {
+        string sql = @"
+        INSERT INTO TutorialAppSchema.UserSalary (
+            [UserId],
+            [Salary]
+        ) VALUES (" + user.UserId +
+            ", " + user.Salary +
+        ")";
+
+        if (_dapper.ExecuteSql(sql))
+        {
+            return Ok(user);
+        }
+        throw new Exception("Failed to Add User Salary");
+    }
+
+
+
+    [HttpPost("AddUserJobInfo")]
+    public IActionResult AddUserJobInfo(UserJobInfo user)
+    {
+        string sql = @"
+        INSERT INTO TutorialAppSchema.UserJobInfo(
+            [UserId],
+            [JobTitle],
+            [Department]
+    ) VALUES ('" + user.UserId +
+            "', '" + user.JobTitle +
+            "', '" + user.Department +
+        "')";
+
+        if (_dapper.ExecuteSql(sql))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to Add User Job Info");
     }
 
 
@@ -116,13 +218,41 @@ public class UserController : ControllerBase
             DELETE FROM TutorialAppSchema.Users
                 WHERE UserId = " + userId.ToString();
 
-        Console.WriteLine(sql);
-
         if (_dapper.ExecuteSql(sql))
         {
             return Ok();
         }
         throw new Exception("Failed to Delete User");
+    }
+
+
+    [HttpDelete("DeleteUserSalary/{userId}")]
+    public IActionResult DeleteUserSalary(int userId)
+    {
+        string sql = @"
+            DELETE FROM TutorialAppSchema.UserSalary
+                WHERE UserId = " + userId;
+
+        if (_dapper.ExecuteSql(sql))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to Delete User Salary");
+    }
+
+
+    [HttpDelete("DeleteUserJobInfo/{userId}")]
+    public IActionResult DeleteUserJobInfo(int userId)
+    {
+        string sql = @"
+            DELETE FROM TutorialAppSchema.UserJobInfo
+                WHERE UserId = " + userId.ToString();
+
+        if (_dapper.ExecuteSql(sql))
+        {
+            return Ok();
+        }
+        throw new Exception("Failed to Delete User Job Info");
     }
 
 }
