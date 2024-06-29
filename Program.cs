@@ -1,4 +1,8 @@
+using System.Text;
+using DotnetAPI.Data;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,6 +34,32 @@ builder.Services.AddCors((options) =>
     });
 });
 
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+string? tokenKeyString = builder.Configuration.GetSection("AppSettings:TokenKey").Value;
+
+SymmetricSecurityKey tokenKey = new SymmetricSecurityKey(
+    Encoding.UTF8.GetBytes(
+        tokenKeyString != null ? tokenKeyString : "")
+);
+
+TokenValidationParameters tokenValidationParameters = new TokenValidationParameters()
+{
+    IssuerSigningKey = tokenKey,
+    // validate whether token being passed to the api is a valid token
+    ValidateIssuer = false,
+    ValidateIssuerSigningKey = false,
+    ValidateAudience = false
+    // these settings give us ability to use POSTMAN, create new token with jwt.io
+    // test for a user where you may not have the password
+};
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = tokenValidationParameters;
+    });
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -45,6 +75,14 @@ else
     app.UseCors("ProdCors");
     app.UseHttpsRedirection();
 }
+
+app.UseAuthentication();
+// use authentication must come before use authorization, otherwise it won't work
+
+app.UseAuthorization();
+
+
+
 
 app.MapControllers();
 // will have access to controllers able to set up our routes for us
