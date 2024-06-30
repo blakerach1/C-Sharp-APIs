@@ -21,13 +21,6 @@ public class UserController : ControllerBase
         // this is a constructor
     }
 
-    // [HttpGet("TestConnection")]
-    // public DateTime TestConnection()
-    // {
-    //     return _dapper.LoadDataSingle<DateTime>("SELECT GETDATE()");
-    // }
-
-
     [HttpGet("GetUsers")]
     // the above is an end point 
     public IEnumerable<User> GetUsers()
