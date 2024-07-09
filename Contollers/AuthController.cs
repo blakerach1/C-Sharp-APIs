@@ -3,6 +3,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using AutoMapper;
+using Dapper;
 using DotnetAPI.Data;
 using DotnetAPI.Models;
 using DotNetApi.Dtos;
@@ -26,11 +28,18 @@ namespace DotNetApi.Controllers
 
         private readonly DataContextDapper _dapper;
         private readonly AuthHelper _authHelper;
+        private readonly ReuseableSql _reuseableSql;
+        private readonly IMapper _mapper;
 
         public AuthController(IConfiguration config)
         {
             _dapper = new DataContextDapper(config);
             _authHelper = new AuthHelper(config);
+            _reuseableSql = new ReuseableSql(config);
+            _mapper = new Mapper(new MapperConfiguration(cfg =>
+            {
+                cfg.CreateMap<UserForRegistrationDto, UserComplete>();
+            }));
             /* This constructor gives our auth controller direct access to config file 
             and anb instance of our datacontext with Dapper*/
         }
@@ -41,56 +50,23 @@ namespace DotNetApi.Controllers
         {
             if (userForRegistration.Password == userForRegistration.PasswordConfirm)
             {
-                string sqlCheckUserExists = "SELECT Email FROM TutorialAppSchema.Auth WHERE Email='" +
+                string sqlCheckUserExists = "SELECT Email FROM TutorialAppSchema.Auth WHERE Email = '" +
                     userForRegistration.Email + "'";
 
                 IEnumerable<string> existingUsers = _dapper.LoadData<string>(sqlCheckUserExists);
                 if (existingUsers.Count() == 0)
                 {
-                    byte[] passwordSalt = new byte[128 / 8];
-                    // set size to 128 bytes
-                    using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+                    UserForLoginDto userForSetPassword = new UserForLoginDto()
                     {
-                        rng.GetNonZeroBytes(passwordSalt);
-                    }
-                    // random generator
-
-                    byte[] passwordHash = _authHelper.getPasswordHash(userForRegistration.Password, passwordSalt);
-
-                    string sqlAddAuth = @"
-                        INSERT INTO TutorialAppSchema.Auth ([Email],
-                        [PasswordHash],
-                        [PasswordSalt]) VALUES ('" + userForRegistration.Email +
-                        "', @PasswordHash, @PasswordSalt)";
-                    // sql string that can have values passed to it @ allows variable declaration
-
-                    // list of sql parameters
-                    List<SqlParameter> sqlParameters = new List<SqlParameter>();
-
-                    SqlParameter passwordSaltParameter = new SqlParameter("@PasswordSalt", SqlDbType.VarBinary);
-                    passwordSaltParameter.Value = passwordSalt;
-                    SqlParameter passwordHashParameter = new SqlParameter("@PasswordHash", SqlDbType.VarBinary);
-                    passwordHashParameter.Value = passwordHash;
-
-                    sqlParameters.Add(passwordSaltParameter);
-                    sqlParameters.Add(passwordHashParameter);
-
-                    if (_dapper.ExecuteSqlWithParameters(sqlAddAuth, sqlParameters))
+                        Email = userForRegistration.Email,
+                        Password = userForRegistration.Password,
+                    };
+                    if (_authHelper.SetPassword(userForSetPassword))
                     {
+                        UserComplete userComplete = _mapper.Map<UserComplete>(userForRegistration);
+                        userComplete.Active = true;
 
-                        string sqlAddUser = @"INSERT INTO TutorialAppSchema.Users(
-                            [FirstName],
-                            [LastName],
-                            [Email],
-                            [Gender],
-                            [Active]
-                        ) VALUES ('" + userForRegistration.FirstName +
-                            "', '" + userForRegistration.LastName +
-                            "', '" + userForRegistration.Email +
-                            "', '" + userForRegistration.Gender +
-                            "', 1)";
-
-                        if (_dapper.ExecuteSql(sqlAddUser))
+                        if (_reuseableSql.UpsertUser(userComplete))
                         {
                             return Ok();
                         }
@@ -104,22 +80,38 @@ namespace DotNetApi.Controllers
             throw new Exception("Passwords do not match!");
         }
 
+
+        [HttpPut("ResetPassword")]
+
+        public IActionResult ResetPassword(UserForLoginDto userForSetPassword)
+        {
+            if (_authHelper.SetPassword(userForSetPassword))
+            {
+                return Ok();
+            }
+            throw new Exception("Failed to update password!");
+        }
+
+
         [AllowAnonymous]
         [HttpPost("Login")]
         public IActionResult Login(UserForLoginDto userForLogin)
         {
-            string sqlForHashAndSalt = @"SELECT
-                [PasswordHash],
-                [PasswordSalt] FROM TutorialAppSchema.Auth WHERE Email = '" +
-                userForLogin.Email + "'";
+            string sqlForHashAndSalt = @"EXEC TutorialAppSchema.spLoginConfirmation_Get
+                @Email = @EmailParam";
+
+            // list of sql parameters
+            DynamicParameters sqlParameters = new DynamicParameters();
+
+            sqlParameters.Add("@EmailParam", userForLogin.Email, DbType.String);
 
             UserForLoginConfirmationDto userForConfirmation = _dapper
-                .LoadDataSingle<UserForLoginConfirmationDto>(sqlForHashAndSalt);
+                .LoadDataSingleWithParameters<UserForLoginConfirmationDto>(sqlForHashAndSalt, sqlParameters);
 
             byte[] passwordHash = _authHelper.getPasswordHash(userForLogin.Password, userForConfirmation.PasswordSalt);
 
             // cant directly compare as they are objects
-            // instead we need to loop throw and compare the bytes at each index
+            // instead we need to loop through and compare the bytes at each index
 
             for (int index = 0; index < passwordHash.Length; index++)
             {
@@ -129,12 +121,10 @@ namespace DotNetApi.Controllers
                 }
             }
 
-            string userIdSql = @"
-                SELECT UserId FROM TutorialAppSchema.Users WHERE Email= '" +
-                userForLogin.Email + "'";
+            string userIdSql = @"EXEC TutorialAppSchema.spUserId_Get 
+            @Email = @EmailParam";
 
-            int userId = _dapper.LoadDataSingle<int>(userIdSql);
-
+            int userId = _dapper.LoadDataSingleWithParameters<int>(userIdSql, sqlParameters);
 
             // can return token to user, so that they don't need to keep authorising
             // themselves over and over
@@ -143,16 +133,21 @@ namespace DotNetApi.Controllers
             });
         }
 
+
         [HttpGet("RefreshToken")]
 
         public IActionResult RefreshToken()
         {
             string userId = User.FindFirst("userId")?.Value + "";
 
-            string userIdSql = "SELECT userId From TutorialAppSchema.Users WHERE UserId = "
-            + userId;
+            string userIdSql = @"EXEC TutorialAppSchema.spUserId_Get
+            @UserId = @UserIdParam";
 
-            int userIdFromDB = _dapper.LoadDataSingle<int>(userIdSql);
+            DynamicParameters sqlParameters = new DynamicParameters();
+
+            sqlParameters.Add("@UserIdParam", userId, DbType.Int32);
+
+            int userIdFromDB = _dapper.LoadDataSingleWithParameters<int>(userIdSql, sqlParameters);
 
             return Ok(new Dictionary<string, string> {
                 {"token", _authHelper.CreateToken(userIdFromDB)}
